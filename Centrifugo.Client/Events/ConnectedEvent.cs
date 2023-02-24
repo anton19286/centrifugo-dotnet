@@ -4,7 +4,7 @@ namespace Centrifugo.Client.Events
 {
     public class ConnectedEvent
     {
-        public Guid? Client { get; set; }
+        public string? ClientID { get; set; }
 
         public string? Version { get; set; }
 

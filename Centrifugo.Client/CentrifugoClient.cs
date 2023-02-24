@@ -26,8 +26,16 @@ namespace Centrifugo.Client
 
     public sealed class CentrifugoClient : ICentrifugoClient
     {
-        #region Поля
 
+        const string StateDisconnected = "disconnected";
+        const string StateConnecting = "connecting";
+        const string StateConnected = "connected";
+        const string StateClosed = "closed";
+
+        #region Fields
+
+        private string _state;
+//        private string _name="c#";
         private string? _token;
         private uint _nextOperationId = 1;
         private bool _authorized;
@@ -50,12 +58,13 @@ namespace Centrifugo.Client
 
         private readonly Subject<long> _pingEventsSource = new Subject<long>();
 
-        #endregion Поля
+        #endregion Fields
 
         #region Конструктор
 
         public CentrifugoClient(IWebsocketClient ws)
         {
+            _state = StateDisconnected;
             _ws = ws ?? throw new ArgumentNullException(nameof(ws));
 
             if (!_ws.Url.Query.Contains("format=protobuf"))
@@ -116,6 +125,10 @@ namespace Centrifugo.Client
 
         public async Task ConnectAsync(CancellationToken cancellationToken = default)
         {
+            if (_state == StateClosed) 
+            {
+                throw new InvalidOperationException("state is Closed");
+            }
             if (string.IsNullOrWhiteSpace(_token))
             {
                 throw new InvalidOperationException("Токен не установлен");
@@ -126,16 +139,18 @@ namespace Centrifugo.Client
                 return;
             }
 
+            _state = StateConnecting;
+
             await _ws.StartOrFail();
 
             var connectCommand = new Command
             {
                 Id = InterlockedEx.Increment(ref _nextOperationId),
-                Method = MethodType.Connect,
-                Params = new ConnectRequest
+                Method = Command.Types.MethodType.Connect,
+                Connect = new ConnectRequest
                 {
                     Token = _token
-                }.ToByteString()
+                }
             };
 
             // TODO: retry with exponential backoff, reinit connection on connection lost
@@ -144,10 +159,10 @@ namespace Centrifugo.Client
             var connectResult = ConnectResult.Parser.ParseFrom(response);
             _authorized = true;
             //_clientId = authResult.Client;
-
+        
             _connectedEventSource.OnNext(new ConnectedEvent
             {
-                Client = Guid.Parse(connectResult.Client),
+                ClientID = connectResult.Client,
                 Expires = connectResult.Expires,
                 Ttl = connectResult.Ttl,
                 Version = connectResult.Version
@@ -199,14 +214,14 @@ namespace Centrifugo.Client
             var subscribeCommand = new Command
             {
                 Id = InterlockedEx.Increment(ref _nextOperationId),
-                Method = MethodType.Subscribe,
-                Params = new SubscribeRequest
+                Method = Command.Types.MethodType.Subscribe,
+                Subscribe  = new SubscribeRequest
                 {
                     Channel = subscription.Channel,
                     Offset = subscription.Offset,
                     Recover = false,
                     Token = _token,
-                }.ToByteString()
+                }
             };
 
             try
@@ -248,17 +263,17 @@ namespace Centrifugo.Client
                 var unsubscribeCommand = new Command
                 {
                     Id = InterlockedEx.Increment(ref _nextOperationId),
-                    Method = MethodType.Unsubscribe,
-                    Params = new UnsubscribeRequest
+                    Method = Command.Types.MethodType.Unsubscribe,
+                    Unsubscribe = new UnsubscribeRequest
                     {
                         Channel = channel
-                    }.ToByteString()
+                    }
                 };
 
                 await HandleCommand(unsubscribeCommand, cancellationToken);
 
                 subscription.State = SubscriptionState.Unsubscribed;
-                subscription.UnsubscribedEventSource?.OnNext(new UnsubscribedEvent(subscription.Channel, false));
+                subscription.UnsubscribedEventSource?.OnNext(new UnsubscribedEvent(subscription.Channel, 0, ""));
                 subscription.Dispose();
             }
         }
@@ -273,12 +288,12 @@ namespace Centrifugo.Client
             var publishCommand = new Command
             {
                 Id = InterlockedEx.Increment(ref _nextOperationId),
-                Method = MethodType.Publish,
-                Params = new PublishRequest
+                Method = Command.Types.MethodType.Publish,
+                Publish = new PublishRequest
                 {
                     Channel = channel,
                     Data = ByteString.CopyFrom(payload.Span)
-                }.ToByteString()
+                }
             };
 
             await HandleCommand(
@@ -552,7 +567,7 @@ namespace Centrifugo.Client
                                 var push = Push.Parser.ParseFrom(reply.Result);
 
                                 // async messages from server
-                                if (push.Type == PushType.Message)
+                                if (push.Type == Push.Types.PushType.Message)
                                 {
                                     var message = Message.Parser.ParseFrom(push.Data);
 
@@ -568,7 +583,7 @@ namespace Centrifugo.Client
 
                                 switch (push.Type)
                                 {
-                                    case PushType.Publication:
+                                    case Push.Types.PushType.Publication:
                                     {
                                         var publication = Publication.Parser.ParseFrom(push.Data);
 
@@ -577,28 +592,28 @@ namespace Centrifugo.Client
 
                                         break;
                                     }
-                                    case PushType.Join:
+                                    case Push.Types.PushType.Join:
 
                                         var join = Join.Parser.ParseFrom(push.Data);
 
                                         channel.JoinEventSource?.OnNext(new JoinEvent(push.Channel, join.Info));
 
                                         break;
-                                    case PushType.Leave:
+                                    case Push.Types.PushType.Leave:
 
                                         var leave = Leave.Parser.ParseFrom(push.Data);
 
                                         channel.LeaveEventSource?.OnNext(new LeaveEvent(push.Channel, leave.Info));
 
                                         break;
-                                    case PushType.Unsub:
-                                        var unsub = Unsub.Parser.ParseFrom(push.Data);
+                                    case Push.Types.PushType.Unsubscribe:
+                                        var unsub = Unsubscribe.Parser.ParseFrom(push.Data);
 
                                         channel.UnsubscribedEventSource?.OnNext(
-                                            new UnsubscribedEvent(push.Channel, unsub.Resubscribe));
+                                            new UnsubscribedEvent(push.Channel, unsub.Code, unsub.Reason));
 
                                         break;
-                                    case PushType.Sub:
+                                    case Push.Types.PushType.Subscribe:
 
                                         //var sub = Sub.Parser.ParseFrom(push.Data);
 
@@ -632,7 +647,7 @@ namespace Centrifugo.Client
             var pingCommand = new Command
             {
                 Id = InterlockedEx.Increment(ref _nextOperationId),
-                Method = MethodType.Ping
+                Method = Command.Types.MethodType.Ping
             };
 
             var timeout = TimeSpan.FromSeconds(5);

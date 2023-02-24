@@ -6,7 +6,7 @@ namespace Centrifugo.Client.Helpers
     {
         public static bool IsAwaitable(this Command cmd)
         {
-            return cmd.Method != MethodType.Send;
+            return cmd.Method != Command.Types.MethodType.Send;
         }
     }
 }
