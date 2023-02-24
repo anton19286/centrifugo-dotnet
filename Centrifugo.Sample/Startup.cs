@@ -41,7 +41,7 @@ namespace Centrifugo.Sample
 
                 ICentrifugoClient client = new CentrifugoClient(ws);
 
-                client.OnConnect(e => logger.LogInformation(e.Client.ToString()));
+                client.OnConnect(e => logger.LogInformation(e.ClientID));
                 // onError, OnDisconnect
 
                 var subscription = client.CreateNewSubscription("test-channel");
