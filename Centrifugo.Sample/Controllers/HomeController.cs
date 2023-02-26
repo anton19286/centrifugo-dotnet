@@ -23,7 +23,7 @@ namespace Centrifugo.Sample.Controllers
 
         public async Task<IActionResult> Index()
         {
-            ViewData["Token"] = await _tokenProvider.GenerateTokenAsync("1");
+            ViewData["Token"] = await _tokenProvider.ConnectionTokenAsync("1");
             ViewData["Url"] = "ws://localhost:8000/connection/websocket";
 
             return View();
@@ -69,7 +69,7 @@ namespace Centrifugo.Sample.Controllers
         [HttpPost("refresh")]
         public async Task<IActionResult> RefreshAsync()
         {
-            var token = await _tokenProvider.GenerateTokenAsync("1");
+            var token = await _tokenProvider.ConnectionTokenAsync("1");
             return Ok(new
             {
                 token

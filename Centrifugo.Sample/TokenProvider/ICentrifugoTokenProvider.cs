@@ -4,9 +4,13 @@ namespace Centrifugo.Sample.TokenProvider
 {
     public interface ICentrifugoTokenProvider
     {
-        Task<string> GenerateTokenAsync(
+        Task<string> ConnectionTokenAsync(
             string clientId,
             string? clientProvidedInfo = null
+        );
+        public Task<string> SubscriptionTokenAsync(
+            string clientId,
+            string channel
         );
     }
 }

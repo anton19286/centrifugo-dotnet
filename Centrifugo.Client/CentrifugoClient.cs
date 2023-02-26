@@ -35,7 +35,7 @@ namespace Centrifugo.Client
         #region Fields
 
         private string _state;
-//        private string _name="c#";
+        //        private string _name="c#";
         private string? _token;
         private uint _nextOperationId = 1;
         private bool _authorized;
@@ -49,7 +49,7 @@ namespace Centrifugo.Client
 
         private readonly IObservable<ConnectedEvent> _connectedEvents;
         private readonly Subject<ConnectedEvent> _connectedEventSource = new Subject<ConnectedEvent>();
-        
+
         private readonly IObservable<ErrorEvent> _errorEvents;
         private readonly Subject<ErrorEvent> _errorEventsSource = new Subject<ErrorEvent>();
 
@@ -123,15 +123,15 @@ namespace Centrifugo.Client
             _token = token;
         }
 
-        public async Task ConnectAsync(CancellationToken cancellationToken = default)
+        public async Task ConnectAsync(string connToken, CancellationToken cancellationToken = default)
         {
-            if (_state == StateClosed) 
+            if (_state == StateClosed)
             {
                 throw new InvalidOperationException("state is Closed");
             }
             if (string.IsNullOrWhiteSpace(_token))
             {
-//                throw new InvalidOperationException("no token");
+                //                throw new InvalidOperationException("no token");
             }
 
             if (_ws.NativeClient?.State == WebSocketState.Open && _authorized)
@@ -149,14 +149,14 @@ namespace Centrifugo.Client
                 Method = Command.Types.MethodType.Connect,
                 Connect = new ConnectRequest
                 {
-                    Token = _token
+                    Token = connToken
                 }
             };
 
             // TODO: retry with exponential backoff, reinit connection on connection lost
             var response = await HandleCommand(connectCommand, cancellationToken);
 
-//            var connectResult = ConnectResult.Parser.ParseFrom(response);
+            //            var connectResult = ConnectResult.Parser.ParseFrom(response);
         }
 
         /// <summary>
@@ -185,7 +185,7 @@ namespace Centrifugo.Client
             throw new Exception();
         }
 
-        public async Task SubscribeAsync(Subscription subscription, CancellationToken cancellationToken = default)
+        public async Task SubscribeAsync(Subscription subscription, string subscriptionToken, CancellationToken cancellationToken = default)
         {
             subscription.State = SubscriptionState.Subscribing;
 
@@ -204,13 +204,13 @@ namespace Centrifugo.Client
             var subscribeCommand = new Command
             {
                 Id = InterlockedEx.Increment(ref _nextOperationId),
-//                Method = Command.Types.MethodType.Subscribe,
-                Subscribe  = new SubscribeRequest
+                //                Method = Command.Types.MethodType.Subscribe,
+                Subscribe = new SubscribeRequest
                 {
                     Channel = subscription.Channel,
                     Offset = subscription.Offset,
                     Recover = false,
-                    Token = _token,
+                    Token = subscriptionToken,
                 }
             };
 
@@ -292,6 +292,13 @@ namespace Centrifugo.Client
             );
         }
 
+        public void Pong()
+        {
+            var pongCommand = new Command { };
+            Console.WriteLine("Command: {0}", pongCommand);
+            Send(pongCommand, _ws);
+        }
+
         // Only for centrifuge library
         public Task SendAsync(string channel, ReadOnlyMemory<byte> payload)
         {
@@ -345,6 +352,13 @@ namespace Centrifugo.Client
 
         #endregion Методы (public)
 
+        static void Send(IMessage message, IWebsocketClient ws)
+        {
+            using var ms = new MemoryStream();
+            message.WriteDelimitedTo(ms);
+            var bytes = ms.ToArray();
+            ws.Send(bytes);
+        }
         private Task<Reply> HandleCommand(Command command, CancellationToken cancellationToken)
         {
             if (_ws.NativeClient?.State != WebSocketState.Open)
@@ -363,20 +377,13 @@ namespace Centrifugo.Client
 
             if (command.Id == default)
             {
-                throw new Exception();
+              throw new Exception();
             }
 
             var tcs = new TaskCompletionSource<Reply>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             TrackOperation(tcs);
             Send(command, _ws);
-
-            static void Send(IMessage message, IWebsocketClient ws)
-            {
-                using var ms = new MemoryStream();
-                message.WriteDelimitedTo(ms);
-                ws.Send(ms.GetBuffer());
-            }
 
             void TrackOperation(TaskCompletionSource<Reply> operation)
             {
@@ -664,6 +671,9 @@ namespace Centrifugo.Client
                         else if ((reply.Publish != null))
                         {
                             gotPublish(reply);
+                        } else
+                        {
+                            Pong();
                         }
 
                         if (reply.Id == 0)

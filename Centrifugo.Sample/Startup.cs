@@ -25,6 +25,9 @@ namespace Centrifugo.Sample
 
         public IConfiguration Configuration { get; }
 
+        private string _channel = "test-channel";
+        private string _user = "42";
+
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
@@ -43,11 +46,11 @@ namespace Centrifugo.Sample
 
                 client.OnConnect(e => 
                 {
-                    logger.LogInformation("ClientID: {0}", e.ClientID);
+//                    logger.LogInformation("ClientID: {0}", e.ClientID);
                 });
                 // onError, OnDisconnect
 
-                var subscription = client.CreateNewSubscription("test-channel");
+                var subscription = client.CreateNewSubscription(_channel);
 
                 subscription.OnSubscribe(e =>
                 {
@@ -75,13 +78,11 @@ namespace Centrifugo.Sample
 
                 Task.Run(async () =>
                 {
-                    var token = await tokenProvider
-                        .GenerateTokenAsync("SomeClientId", "my name is client");
-//                    logger.LogInformation("Token: {0}", token);
-
+                    var token = await tokenProvider.ConnectionTokenAsync(_user, "my name is client");
                     client.SetToken(token);
-                    await client.ConnectAsync();
-                    await client.SubscribeAsync(subscription);
+                    await client.ConnectAsync(token);
+                    token = await tokenProvider.SubscriptionTokenAsync(_user, _channel);
+                    await client.SubscribeAsync(subscription, token);
                 }).GetAwaiter().GetResult();
 
                 return client;

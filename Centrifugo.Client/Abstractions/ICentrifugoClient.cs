@@ -13,9 +13,9 @@ namespace Centrifugo.Client.Abstractions
 
         void SetToken(string token);
 
-        Task ConnectAsync(CancellationToken cancellationToken = default);
+        Task ConnectAsync(string connToken, CancellationToken cancellationToken = default);
 
-        Task SubscribeAsync(Subscription subscription, CancellationToken cancellationToken = default);
+        Task SubscribeAsync(Subscription subscription, string subscriptionToken, CancellationToken cancellationToken = default);
 
         Task UnsubscribeAsync(string channel, CancellationToken cancellationToken = default);
 
