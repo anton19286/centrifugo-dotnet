@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Centrifugo.Client.Options;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using Protocol;
 
 namespace Centrifugo.Sample.TokenProvider
 {
@@ -52,6 +53,8 @@ namespace Centrifugo.Sample.TokenProvider
                     : now,
                 signingCredentials: new SigningCredentials(GetSymmetricSecurityKey(_authOptions.SecretKey), SecurityAlgorithms.HmacSha256)
             );
+            Console.WriteLine("Token: {0}", jwt);
+            Console.WriteLine("Token key: {0}", _authOptions.SecretKey);
 
             return Task.FromResult(new JwtSecurityTokenHandler().WriteToken(jwt));
 

@@ -60,7 +60,7 @@ namespace Centrifugo.Client
 
         #endregion Fields
 
-        #region Конструктор
+        #region Ctor
 
         public CentrifugoClient(IWebsocketClient ws)
         {
@@ -87,9 +87,9 @@ namespace Centrifugo.Client
             HandleSocketMessages();
         }
 
-        #endregion Конструктор
+        #endregion Ctor
 
-        #region Методы (public)
+        #region Methods (public)
 
         #region Events
 
@@ -131,7 +131,7 @@ namespace Centrifugo.Client
             }
             if (string.IsNullOrWhiteSpace(_token))
             {
-                throw new InvalidOperationException("Токен не установлен");
+//                throw new InvalidOperationException("no token");
             }
 
             if (_ws.NativeClient?.State == WebSocketState.Open && _authorized)
@@ -204,7 +204,7 @@ namespace Centrifugo.Client
             var subscribeCommand = new Command
             {
                 Id = InterlockedEx.Increment(ref _nextOperationId),
-                Method = Command.Types.MethodType.Subscribe,
+//                Method = Command.Types.MethodType.Subscribe,
                 Subscribe  = new SubscribeRequest
                 {
                     Channel = subscription.Channel,
@@ -351,6 +351,8 @@ namespace Centrifugo.Client
             {
                 return NullTaskResult.NotConnected;
             }
+
+            Console.WriteLine("Command: {0}", command);
 
             if (!command.IsAwaitable())
             {
@@ -627,12 +629,13 @@ namespace Centrifugo.Client
             _ws.MessageReceived.Subscribe(
                 response =>
                 {
-                    Console.WriteLine("------------------------- frame start -------------------------");
-
-                    Console.WriteLine(Encoding.UTF8.GetString(response.Binary));
-
-                    Console.WriteLine("-------------------------- frame end --------------------------");
-
+//                    Console.WriteLine("------------------------- frame start -------------------------");
+//                    Console.WriteLine(Encoding.UTF8.GetString(response.Binary));
+//                    Console.WriteLine("-------------------------- frame end --------------------------");
+                    if (response.Binary.Length == 1 && response.Binary[0] == 0)
+                    {
+                        return;
+                    }
                     using var ms = new MemoryStream(response.Binary);
 
                     while (ms.Position < ms.Length)
@@ -644,10 +647,11 @@ namespace Centrifugo.Client
                         }
                         catch (Exception e)
                         {
-                            Console.WriteLine(e);
-
+                            Console.WriteLine("can't parse response: {0}", e);
                             continue;
                         }
+
+                        Console.WriteLine("Reply: {0}", reply);
 
                         if (reply.Error != null)
                         {

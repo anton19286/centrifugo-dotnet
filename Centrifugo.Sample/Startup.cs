@@ -41,7 +41,10 @@ namespace Centrifugo.Sample
 
                 ICentrifugoClient client = new CentrifugoClient(ws);
 
-                client.OnConnect(e => logger.LogInformation(e.ClientID));
+                client.OnConnect(e => 
+                {
+                    logger.LogInformation("ClientID: {0}", e.ClientID);
+                });
                 // onError, OnDisconnect
 
                 var subscription = client.CreateNewSubscription("test-channel");
@@ -74,6 +77,7 @@ namespace Centrifugo.Sample
                 {
                     var token = await tokenProvider
                         .GenerateTokenAsync("SomeClientId", "my name is client");
+//                    logger.LogInformation("Token: {0}", token);
 
                     client.SetToken(token);
                     await client.ConnectAsync();
