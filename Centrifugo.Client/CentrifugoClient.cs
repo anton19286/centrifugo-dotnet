@@ -43,7 +43,7 @@ namespace Centrifugo.Client
 
         private readonly IWebsocketClient _ws;
 
-        private readonly ConcurrentDictionary<uint, TaskCompletionSource<ByteString>> _operations;
+        private readonly ConcurrentDictionary<uint, TaskCompletionSource<Reply>> _operations;
 
         private readonly ConcurrentDictionary<string, Subscription> _channels;
 
@@ -80,7 +80,7 @@ namespace Centrifugo.Client
             //    .Concat(Observable.Interval(TimeSpan.FromSeconds(10)))
             //    .SubscribeAsync(PingAsync);
 
-            _operations = new ConcurrentDictionary<uint, TaskCompletionSource<ByteString>>();
+            _operations = new ConcurrentDictionary<uint, TaskCompletionSource<Reply>>();
             _channels = new ConcurrentDictionary<string, Subscription>();
 
             HandleConnection();
@@ -156,7 +156,7 @@ namespace Centrifugo.Client
             // TODO: retry with exponential backoff, reinit connection on connection lost
             var response = await HandleCommand(connectCommand, cancellationToken);
 
-            var connectResult = ConnectResult.Parser.ParseFrom(response);
+//            var connectResult = ConnectResult.Parser.ParseFrom(response);
         }
 
         /// <summary>
@@ -345,7 +345,7 @@ namespace Centrifugo.Client
 
         #endregion Методы (public)
 
-        private Task<ByteString> HandleCommand(Command command, CancellationToken cancellationToken)
+        private Task<Reply> HandleCommand(Command command, CancellationToken cancellationToken)
         {
             if (_ws.NativeClient?.State != WebSocketState.Open)
             {
@@ -364,7 +364,7 @@ namespace Centrifugo.Client
                 throw new Exception();
             }
 
-            var tcs = new TaskCompletionSource<ByteString>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var tcs = new TaskCompletionSource<Reply>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             TrackOperation(tcs);
             Send(command, _ws);
@@ -376,7 +376,7 @@ namespace Centrifugo.Client
                 ws.Send(ms.GetBuffer());
             }
 
-            void TrackOperation(TaskCompletionSource<ByteString> operation)
+            void TrackOperation(TaskCompletionSource<Reply> operation)
             {
                 _operations[command.Id] = operation;
                 cancellationToken.Register(() =>
@@ -463,6 +463,27 @@ namespace Centrifugo.Client
 
                         break;
                     }
+                case 103:
+                    {
+                        // permission denied
+                        if (reply.Id != 0 && _operations.TryRemove(reply.Id, out var taskCompletionSource))
+                        {
+                            _authorized = false;
+
+                            taskCompletionSource.TrySetException(
+                                new UnauthorizedException(
+                                    reply.Error.Code,
+                                    reply.Error.Message
+                                )
+                            );
+                        }
+                        else
+                        {
+                            // warning...
+                        }
+
+                        break;
+                    }
                 case 106:
                     {
                         // длина канала исчерпана и прочие ошибки limit exceeded
@@ -525,6 +546,8 @@ namespace Centrifugo.Client
         private bool gotPush(Reply reply)
         {
             var push = reply.Push;
+            if (null == push)
+                return false;
 
             // async messages from server
             if (push.Type == Push.Types.PushType.Message)
@@ -639,21 +662,14 @@ namespace Centrifugo.Client
                             gotPublish(reply);
                         }
 
-                        else if (reply.Result != ByteString.Empty)
+                        if (reply.Id == 0)
                         {
-                            if (reply.Id == 0) // если 0, то это push
-                            {
-                                if (gotPush(reply))
-                                    continue;
-                            }
-                            else if (_operations.TryRemove(reply.Id, out var taskCompletionSource))
-                            {
-                                taskCompletionSource.SetResult(reply.Result);
-                            }
+                            if (gotPush(reply))
+                                continue;
                         }
-                        else if (reply.Id != 0 && _operations.TryRemove(reply.Id, out var taskCompletionSource))
+                        else if (_operations.TryRemove(reply.Id, out var taskCompletionSource))
                         {
-                            taskCompletionSource.TrySetResult(reply.Result);
+                            taskCompletionSource.SetResult(reply);
                         }
                     }
                 });

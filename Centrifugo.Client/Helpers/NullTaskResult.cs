@@ -1,13 +1,14 @@
 ﻿using System;
 using System.Threading.Tasks;
 using Google.Protobuf;
+using Protocol;
 
 namespace Centrifugo.Client.Helpers
 {
     public static class NullTaskResult
     {
-        public static Task<ByteString> Instance { get; } = Task.FromResult(ByteString.Empty);
+        public static Task<Reply> Instance { get; } = Task.FromResult(new Reply());
 
-        public static Task<ByteString> NotConnected { get; } = Task.FromException<ByteString>(new Exception("Not connected"));
+        public static Task<Reply> NotConnected { get; } = Task.FromException<Reply>(new Exception("Not connected"));
     }
 }
