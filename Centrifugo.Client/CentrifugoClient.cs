@@ -157,16 +157,6 @@ namespace Centrifugo.Client
             var response = await HandleCommand(connectCommand, cancellationToken);
 
             var connectResult = ConnectResult.Parser.ParseFrom(response);
-            _authorized = true;
-            //_clientId = authResult.Client;
-        
-            _connectedEventSource.OnNext(new ConnectedEvent
-            {
-                ClientID = connectResult.Client,
-                Expires = connectResult.Expires,
-                Ttl = connectResult.Ttl,
-                Version = connectResult.Version
-            });
         }
 
         /// <summary>
@@ -206,7 +196,7 @@ namespace Centrifugo.Client
 
                 subscription.SubscriptionErrorEventSource?.OnNext(new SubscriptionErrorEvent(subscription.Channel));
                 // TODO: exceptions
-                throw new Exception();
+                throw new Exception("not connected");
             }
 
             var offset = subscription.Offset;
@@ -226,7 +216,7 @@ namespace Centrifugo.Client
 
             try
             {
-                await HandleCommand(subscribeCommand, cancellationToken);
+                var response = await HandleCommand(subscribeCommand, cancellationToken);
 
                 subscription.State = SubscriptionState.Subscribed;
 
@@ -270,7 +260,7 @@ namespace Centrifugo.Client
                     }
                 };
 
-                await HandleCommand(unsubscribeCommand, cancellationToken);
+                var response = await HandleCommand(unsubscribeCommand, cancellationToken);
 
                 subscription.State = SubscriptionState.Unsubscribed;
                 subscription.UnsubscribedEventSource?.OnNext(new UnsubscribedEvent(subscription.Channel, 0, ""));
@@ -442,12 +432,178 @@ namespace Centrifugo.Client
             });
         }
 
+        private void hasError(Reply reply)
+        {
+            switch (reply.Error.Code)
+            {
+                case 100:
+
+                    // push refresh token
+
+                    break;
+
+                case 101:
+                    {
+                        // unauthorized exception
+                        if (reply.Id != 0 && _operations.TryRemove(reply.Id, out var taskCompletionSource))
+                        {
+                            _authorized = false;
+
+                            taskCompletionSource.TrySetException(
+                                new UnauthorizedException(
+                                    reply.Error.Code,
+                                    reply.Error.Message
+                                )
+                            );
+                        }
+                        else
+                        {
+                            // warning...
+                        }
+
+                        break;
+                    }
+                case 106:
+                    {
+                        // длина канала исчерпана и прочие ошибки limit exceeded
+                        if (reply.Id != 0 && _operations.TryRemove(reply.Id, out var taskCompletionSource))
+                        {
+                            taskCompletionSource.TrySetException(
+                                new CentrifugoException(
+                                    reply.Error.Code,
+                                    reply.Error.Message
+                                )
+                            );
+                        }
+                        else
+                        {
+                            // warning...
+                        }
+
+                        break;
+                    }
+                case 107: // bad request
+                    {
+                        if (reply.Id != 0 && _operations.TryRemove(reply.Id, out var taskCompletionSource))
+                        {
+                            taskCompletionSource.TrySetException(
+                                new CentrifugoException(
+                                    reply.Error.Code,
+                                    reply.Error.Message
+                                )
+                            );
+                        }
+
+                        _errorEventsSource?.OnNext(new ErrorEvent(reply.Error.Code, reply.Error.Message));
+
+                        break;
+                    }
+                case 109:
+                    {
+                        // token expired
+                        if (reply.Id != 0 &&
+                            _operations.TryRemove(reply.Id, out var taskCompletionSource))
+                        {
+                            taskCompletionSource.TrySetException(
+                                new TokenExpiredException(
+                                    reply.Error.Code,
+                                    reply.Error.Message
+                                )
+                            );
+                        }
+                        else
+                        {
+                            // warning...
+                        }
+
+                        break;
+                    }
+                default:
+                    break;
+            }
+        }
+        private bool gotPush(Reply reply)
+        {
+            var push = reply.Push;
+
+            // async messages from server
+            if (push.Type == Push.Types.PushType.Message)
+            {
+                var message = Message.Parser.ParseFrom(push.Data);
+
+                _messageEventsSource?.OnNext(new MessageEvent(push.Channel, message.Data));
+
+                return true;
+            }
+
+            if (!_channels.TryGetValue(push.Channel, out var channel))
+            {
+                return true;
+            }
+
+            switch (push.Type)
+            {
+                case Push.Types.PushType.Publication:
+                    {
+                        var publication = Publication.Parser.ParseFrom(push.Data);
+
+                        channel.PublishEventSource?.OnNext(new PublishEvent(push.Channel,
+                            publication.Data));
+
+                        break;
+                    }
+                case Push.Types.PushType.Join:
+
+                    var join = Join.Parser.ParseFrom(push.Data);
+
+                    channel.JoinEventSource?.OnNext(new JoinEvent(push.Channel, join.Info));
+
+                    break;
+                case Push.Types.PushType.Leave:
+
+                    var leave = Leave.Parser.ParseFrom(push.Data);
+
+                    channel.LeaveEventSource?.OnNext(new LeaveEvent(push.Channel, leave.Info));
+
+                    break;
+                case Push.Types.PushType.Unsubscribe:
+                    var unsub = Unsubscribe.Parser.ParseFrom(push.Data);
+
+                    channel.UnsubscribedEventSource?.OnNext(
+                        new UnsubscribedEvent(push.Channel, unsub.Code, unsub.Reason));
+
+                    break;
+                case Push.Types.PushType.Subscribe:
+
+                    //var sub = Sub.Parser.ParseFrom(push.Data);
+
+                    channel.SubscribedEventSource?.OnNext(new SubscribedEvent(push.Channel));
+
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+            return false;
+        }
+        private void gotConnect(Reply reply)
+        {
+            _authorized = true;
+            //_clientId = authResult.Client;
+
+            _connectedEventSource.OnNext(new ConnectedEvent
+            {
+                ClientID = reply.Connect.Client,
+                Expires = reply.Connect.Expires,
+                Ttl = reply.Connect.Ttl,
+                Version = reply.Connect.Version
+            });
+
+        }
         private void HandleSocketMessages()
         {
             _ws.MessageReceived.Subscribe(
                 response =>
                 {
-                    Console.WriteLine();
                     Console.WriteLine("------------------------- frame start -------------------------");
 
                     Console.WriteLine(Encoding.UTF8.GetString(response.Binary));
@@ -472,157 +628,23 @@ namespace Centrifugo.Client
 
                         if (reply.Error != null)
                         {
-                            switch (reply.Error.Code)
-                            {
-                                case 100:
-
-                                    // push refresh token
-
-                                    break;
-
-                                case 101:
-                                {
-                                    // unauthorized exception
-                                    if (reply.Id != 0 && _operations.TryRemove(reply.Id, out var taskCompletionSource))
-                                    {
-                                        _authorized = false;
-
-                                        taskCompletionSource.TrySetException(
-                                            new UnauthorizedException(
-                                                reply.Error.Code,
-                                                reply.Error.Message
-                                            )
-                                        );
-                                    }
-                                    else
-                                    {
-                                        // warning...
-                                    }
-
-                                    break;
-                                }
-                                case 106:
-                                {
-                                    // длина канала исчерпана и прочие ошибки limit exceeded
-                                    if (reply.Id != 0 && _operations.TryRemove(reply.Id, out var taskCompletionSource))
-                                    {
-                                        taskCompletionSource.TrySetException(
-                                            new CentrifugoException(
-                                                reply.Error.Code,
-                                                reply.Error.Message
-                                            )
-                                        );
-                                    }
-                                    else
-                                    {
-                                        // warning...
-                                    }
-
-                                    break;
-                                }
-                                case 107: // bad request
-                                {
-                                    if (reply.Id != 0 && _operations.TryRemove(reply.Id, out var taskCompletionSource))
-                                    {
-                                        taskCompletionSource.TrySetException(
-                                            new CentrifugoException(
-                                                reply.Error.Code,
-                                                reply.Error.Message
-                                            )
-                                        );
-                                    }
-
-                                    _errorEventsSource?.OnNext(new ErrorEvent(reply.Error.Code, reply.Error.Message));
-
-                                    break;
-                                }
-                                case 109:
-                                {
-                                    // token expired
-                                    if (reply.Id != 0 &&
-                                        _operations.TryRemove(reply.Id, out var taskCompletionSource))
-                                    {
-                                        taskCompletionSource.TrySetException(
-                                            new TokenExpiredException(
-                                                reply.Error.Code,
-                                                reply.Error.Message
-                                            )
-                                        );
-                                    }
-                                    else
-                                    {
-                                        // warning...
-                                    }
-
-                                    break;
-                                }
-                                default:
-                                    break;
-                            }
+                            hasError(reply);
                         }
+                        else if ((reply.Connect != null))
+                        {
+                            gotConnect(reply);
+                        }
+                        else if ((reply.Publish != null))
+                        {
+                            gotPublish(reply);
+                        }
+
                         else if (reply.Result != ByteString.Empty)
                         {
                             if (reply.Id == 0) // если 0, то это push
                             {
-                                var push = Push.Parser.ParseFrom(reply.Result);
-
-                                // async messages from server
-                                if (push.Type == Push.Types.PushType.Message)
-                                {
-                                    var message = Message.Parser.ParseFrom(push.Data);
-
-                                    _messageEventsSource?.OnNext(new MessageEvent(push.Channel, message.Data));
-
+                                if (gotPush(reply))
                                     continue;
-                                }
-
-                                if (!_channels.TryGetValue(push.Channel, out var channel))
-                                {
-                                    continue;
-                                }
-
-                                switch (push.Type)
-                                {
-                                    case Push.Types.PushType.Publication:
-                                    {
-                                        var publication = Publication.Parser.ParseFrom(push.Data);
-
-                                        channel.PublishEventSource?.OnNext(new PublishEvent(push.Channel,
-                                            publication.Data));
-
-                                        break;
-                                    }
-                                    case Push.Types.PushType.Join:
-
-                                        var join = Join.Parser.ParseFrom(push.Data);
-
-                                        channel.JoinEventSource?.OnNext(new JoinEvent(push.Channel, join.Info));
-
-                                        break;
-                                    case Push.Types.PushType.Leave:
-
-                                        var leave = Leave.Parser.ParseFrom(push.Data);
-
-                                        channel.LeaveEventSource?.OnNext(new LeaveEvent(push.Channel, leave.Info));
-
-                                        break;
-                                    case Push.Types.PushType.Unsubscribe:
-                                        var unsub = Unsubscribe.Parser.ParseFrom(push.Data);
-
-                                        channel.UnsubscribedEventSource?.OnNext(
-                                            new UnsubscribedEvent(push.Channel, unsub.Code, unsub.Reason));
-
-                                        break;
-                                    case Push.Types.PushType.Subscribe:
-
-                                        //var sub = Sub.Parser.ParseFrom(push.Data);
-
-                                        channel.SubscribedEventSource?.OnNext(new SubscribedEvent(push.Channel));
-
-                                        break;
-                                    default:
-                                        throw new ArgumentOutOfRangeException();
-                                }
                             }
                             else if (_operations.TryRemove(reply.Id, out var taskCompletionSource))
                             {
@@ -637,35 +659,12 @@ namespace Centrifugo.Client
                 });
         }
 
-        private async Task<object?> PingAsync(long value)
+        private void gotPublish(Reply reply)
         {
-            if (_ws.NativeClient?.State != WebSocketState.Open || !_authorized)
-            {
-                return NullTaskResult.Instance;
-            }
-
-            var pingCommand = new Command
-            {
-                Id = InterlockedEx.Increment(ref _nextOperationId),
-                Method = Command.Types.MethodType.Ping
-            };
-
-            var timeout = TimeSpan.FromSeconds(5);
-            try
-            {
-                var tokenSource = new CancellationTokenSource(timeout);
-
-                return await
-                    HandleCommand(pingCommand, tokenSource.Token)
-                        .TimeoutAfterAsync(timeout, cancellationToken: tokenSource.Token);
-            }
-            // исключения в observable кидать нельзя - останавливаются.
-            // TODO: если пинг не прошел, нужно реконнектиться заново
-            catch (Exception)
-            {
-                return null;
-            }
+            throw new NotImplementedException();
         }
+
+
     }
 
     // channel name 255 symbols, only ascii
