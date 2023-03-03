@@ -42,7 +42,9 @@ namespace Centrifugo.Sample
                 var ws = sp.GetRequiredService<IWebsocketClient>();
                 var tokenProvider = sp.GetRequiredService<ICentrifugoTokenProvider>();
 
-                ICentrifugoClient client = new CentrifugoClient(ws);
+                var config = new CentrifugoClient.Config();
+                config.GetToken = (s => { return await tokenProvider.ConnectionTokenAsync(s, "my name is client"); });
+                ICentrifugoClient client = new CentrifugoClient(ws, config);
 
                 client.OnConnect(e => 
                 {
@@ -50,7 +52,10 @@ namespace Centrifugo.Sample
                 });
                 // onError, OnDisconnect
 
-                var subscription = client.CreateNewSubscription(_channel);
+                var subscriptionConfig = new Subscription.SubscriptionConfig();
+                subscriptionConfig.Token = await tokenProvider.SubscriptionTokenAsync(_user, _channel);
+
+                var subscription = client.CreateNewSubscription(_channel, subscriptionConfig);
 
                 subscription.OnSubscribe(e =>
                 {
@@ -78,11 +83,8 @@ namespace Centrifugo.Sample
 
                 Task.Run(async () =>
                 {
-                    var token = await tokenProvider.ConnectionTokenAsync(_user, "my name is client");
-                    client.SetToken(token);
-                    await client.ConnectAsync(token);
-                    token = await tokenProvider.SubscriptionTokenAsync(_user, _channel);
-                    await client.SubscribeAsync(subscription, token);
+                    await client.ConnectAsync();
+                    await client.SubscribeAsync(subscription);
                 }).GetAwaiter().GetResult();
 
                 return client;

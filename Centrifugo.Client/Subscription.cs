@@ -9,6 +9,14 @@ namespace Centrifugo.Client
 {
     public sealed class Subscription : IDisposable
     {
+        public class SubscriptionConfig
+        {
+            public string? Token;
+            public delegate string? GetToken(string channel);
+        }
+
+        public SubscriptionConfig Config;
+
         public string Channel { get; }
 
         public ulong Offset { get; internal set; }
@@ -33,7 +41,7 @@ namespace Centrifugo.Client
 
         #endregion Internal channel event sources
 
-        internal Subscription(string channel)
+        internal Subscription(string channel, SubscriptionConfig config)
         {
             if (string.IsNullOrWhiteSpace(channel) || channel.Length > 255)
             {
@@ -41,6 +49,7 @@ namespace Centrifugo.Client
             }
             Channel = channel;
             State = SubscriptionState.New;
+            Config = config;
         }
 
         #region Events

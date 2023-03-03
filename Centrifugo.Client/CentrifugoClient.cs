@@ -32,11 +32,18 @@ namespace Centrifugo.Client
         const string StateConnected = "connected";
         const string StateClosed = "closed";
 
+        public class Config
+        {
+            public string? Token;
+            public delegate string? GetToken(string client);
+        }
+
         #region Fields
+
+        public Config Config;
 
         private string _state;
         //        private string _name="c#";
-        private string? _token;
         private uint _nextOperationId = 1;
         private bool _authorized;
         //private Guid? _clientId;
@@ -62,8 +69,9 @@ namespace Centrifugo.Client
 
         #region Ctor
 
-        public CentrifugoClient(IWebsocketClient ws)
+        public CentrifugoClient(IWebsocketClient ws, Config config)
         {
+            Config = config;
             _state = StateDisconnected;
             _ws = ws ?? throw new ArgumentNullException(nameof(ws));
 
@@ -118,12 +126,7 @@ namespace Centrifugo.Client
 
         #endregion Events
 
-        public void SetToken(string token)
-        {
-            _token = token;
-        }
-
-        public async Task ConnectAsync(string connToken, CancellationToken cancellationToken = default)
+        public async Task ConnectAsync(string user, CancellationToken cancellationToken = default)
         {
             if (_state == StateClosed)
             {
@@ -143,6 +146,7 @@ namespace Centrifugo.Client
 
             await _ws.StartOrFail();
 
+            var connToken = Config.Token ?? Config.GetToken(user);
             var connectCommand = new Command
             {
                 Id = InterlockedEx.Increment(ref _nextOperationId),
@@ -185,7 +189,7 @@ namespace Centrifugo.Client
             throw new Exception();
         }
 
-        public async Task SubscribeAsync(Subscription subscription, string subscriptionToken, CancellationToken cancellationToken = default)
+        public async Task SubscribeAsync(Subscription subscription, CancellationToken cancellationToken = default)
         {
             subscription.State = SubscriptionState.Subscribing;
 
@@ -201,16 +205,17 @@ namespace Centrifugo.Client
 
             var offset = subscription.Offset;
             subscription.Offset = InterlockedEx.Increment(ref offset);
+            var token = subscription.Config.Token ?? subscription.Config.GetToken(subscription.Channel);
             var subscribeCommand = new Command
             {
                 Id = InterlockedEx.Increment(ref _nextOperationId),
                 //                Method = Command.Types.MethodType.Subscribe,
-                Subscribe = new SubscribeRequest
+            Subscribe = new SubscribeRequest
                 {
                     Channel = subscription.Channel,
                     Offset = subscription.Offset,
                     Recover = false,
-                    Token = subscriptionToken,
+                    Token = token,
                 }
             };
 

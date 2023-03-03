@@ -2,7 +2,7 @@
     ViewData["Title"] = "Home Page";
 }
 
-    <script src="//cdn.rawgit.com/centrifugal/centrifuge-js/2.6.0/dist/centrifuge.min.js"></script>
+ <script src="//unpkg.com/centrifuge@3.1.0/dist/centrifuge.js"></script>
 
 <div class="text-center">
     <h1 class="display-4">Welcome</h1>
@@ -21,15 +21,33 @@
 <script>
 
     const messagesBox = document.getElementById('messages-box');
-    const centrifuge = new Centrifuge('@ViewData["Url"]');
+    const centrifuge = new Centrifuge('@ViewData["Url"]', {
+      token: '@ViewData["Token"]'
+    });
 
-    centrifuge.setToken('@ViewData["Token"]');
-    centrifuge.subscribe("test-channel", function(message) {
-        console.log(message);
+	centrifuge.on('connecting', function (ctx) {
+      console.log(`connecting: ${ctx.code}, ${ctx.reason}`);
+    }).on('connected', function (ctx) {
+      console.log(`connected over ${ctx.transport}`);
+    }).on('disconnected', function (ctx) {
+      console.log(`disconnected: ${ctx.code}, ${ctx.reason}`);
+    }).connect();
+
+    const sub = centrifuge.newSubscription("test-channel");
+
+	sub.on('publication', function (ctx) {
+	    var message = ctx.data.value;
+	    console.log(message);
         const p = document.createElement('p');
         p.innerText = JSON.stringify(message);
         messagesBox.append(p);
-    });
+    }).on('subscribing', function (ctx) {
+      console.log(`subscribing: ${ctx.code}, ${ctx.reason}`);
+    }).on('subscribed', function (ctx) {
+      console.log('subscribed', ctx);
+    }).on('unsubscribed', function (ctx) {
+      console.log(`unsubscribed: ${ctx.code}, ${ctx.reason}`);
+    }).subscribe();
 
     document.getElementById('button').addEventListener('click', function (e) {
 
@@ -42,7 +60,4 @@
         });
     });
     
-
-    centrifuge.connect();
-
 </script>

@@ -23,7 +23,7 @@ namespace Centrifugo.Sample.Controllers
 
         public async Task<IActionResult> Index()
         {
-            ViewData["Token"] = await _tokenProvider.ConnectionTokenAsync("1");
+            ViewData["Token"] = await _tokenProvider.ConnectionTokenAsync("1", "web client");
             ViewData["Url"] = "ws://localhost:8000/connection/websocket";
 
             return View();
